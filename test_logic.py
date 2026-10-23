@@ -1,6 +1,7 @@
 import sqlite3
 
 import pytest
+from werkzeug.security import generate_password_hash
 
 from app import create_app
 from db import get_connection, initialize_db
@@ -24,8 +25,21 @@ def connection(tmp_path):
 @pytest.fixture
 def flask_client(tmp_path):
     database_path = tmp_path / "reliefmatch_api_test.sqlite3"
-    app = create_app(database_path)
-    return app.test_client(), database_path
+    app = create_app(database_path, session_secret="test-session-secret")
+    connection = get_connection(database_path)
+    connection.execute(
+        "INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)",
+        ("coordinator", generate_password_hash("test-password"), "coordinator"),
+    )
+    connection.commit()
+    connection.close()
+    client = app.test_client()
+    response = client.post(
+        "/api/login",
+        json={"username": "coordinator", "password": "test-password"},
+    )
+    assert response.status_code == 200
+    return client, database_path
 
 
 def insert_request(connection, *, request_type="water", people=10, severity=3, lat=13.08, lon=80.27):
