@@ -78,124 +78,83 @@ def haversine_distance_km(lat1: float, lon1: float, lat2: float, lon2: float) ->
     return 2 * EARTH_RADIUS_KM * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 
-def match_request(connection: sqlite3.Connection, request_id: int) -> list[dict[str, Any]]:
-    """Allocate the request from nearest same-type resources.
+class MatchSuggestions(list[dict[str, Any]]):
+    """A list of proposed allocations with the unmet quantity attached."""
 
-    A single resource that can cover the remaining need is preferred. If none
-    can, available resources are allocated nearest-first until the request is
-    fully covered or the eligible inventory is exhausted. Existing non-cancelled
-    matches reserve inventory and count toward the request's fulfillment.
+    def __init__(self, allocations: list[dict[str, Any]], shortfall: int = 0):
+        super().__init__(allocations)
+        self.shortfall = shortfall
+
+
+def suggest_match(connection: sqlite3.Connection, request_id: int) -> MatchSuggestions:
+    """Return read-only nearest-resource allocations and any unmet quantity.
+
+    A sufficient single resource is preferred, choosing the nearest such
+    resource. Otherwise, stock is allocated nearest-first across matching
+    resources. The ``shortfall`` attribute is the quantity still unmet.
     """
-    with connection:
-        request = connection.execute(
-            """
-            SELECT id, type, people, lat, lon
-            FROM requests
-            WHERE id = ?
-            """,
-            (request_id,),
-        ).fetchone()
-        if request is None:
-            raise ValueError(f"Request {request_id} does not exist")
+    request = connection.execute(
+        "SELECT id, type, people, lat, lon FROM requests WHERE id = ?",
+        (request_id,),
+    ).fetchone()
+    if request is None:
+        raise ValueError(f"Request {request_id} does not exist")
 
-        already_allocated = connection.execute(
-            """
-            SELECT COALESCE(SUM(quantity), 0)
-            FROM matches
-            WHERE request_id = ? AND status != 'cancelled'
-            """,
-            (request_id,),
-        ).fetchone()[0]
-        remaining = max(0, request["people"] - already_allocated)
-
-        if remaining:
-            resource_rows = connection.execute(
-                """
-                SELECT r.id, r.quantity, r.lat, r.lon,
-                       r.quantity - COALESCE(SUM(
-                           CASE WHEN m.status != 'cancelled' THEN m.quantity ELSE 0 END
-                       ), 0) AS available
-                FROM resources AS r
-                LEFT JOIN matches AS m ON m.resource_id = r.id
-                WHERE r.type = ?
-                GROUP BY r.id, r.quantity, r.lat, r.lon
-                HAVING available > 0
-                """,
-                (request["type"],),
-            ).fetchall()
-
-            nearby = sorted(
-                (
-                    (
-                        haversine_distance_km(
-                            request["lat"], request["lon"], row["lat"], row["lon"]
-                        ),
-                        row["id"],
-                        row["available"],
-                    )
-                    for row in resource_rows
+    resource_rows = connection.execute(
+        """
+        SELECT id, quantity, lat, lon
+        FROM resources
+        WHERE type = ? AND quantity > 0
+        """,
+        (request["type"],),
+    ).fetchall()
+    nearby = sorted(
+        (
+            (
+                haversine_distance_km(
+                    request["lat"], request["lon"], row["lat"], row["lon"]
                 ),
-                key=lambda item: (item[0], item[1]),
+                row["id"],
+                row["quantity"],
             )
+            for row in resource_rows
+        ),
+        key=lambda item: (item[0], item[1]),
+    )
 
-            # Prefer one complete allocation when any single resource can meet
-            # the need; among those candidates, choose the nearest.
-            complete_candidate = next(
-                (candidate for candidate in nearby if candidate[2] >= remaining),
-                None,
-            )
-            allocations: list[tuple[int, int]] = []
-            if complete_candidate is not None:
-                allocations.append((complete_candidate[1], remaining))
-            else:
-                for _, resource_id, available in nearby:
-                    quantity = min(remaining, available)
-                    if quantity > 0:
-                        allocations.append((resource_id, quantity))
-                        remaining -= quantity
-                    if remaining == 0:
-                        break
-
-            for resource_id, quantity in allocations:
-                connection.execute(
-                    """
-                    INSERT INTO matches (request_id, resource_id, quantity, status)
-                    VALUES (?, ?, ?, 'proposed')
-                    """,
-                    (request_id, resource_id, quantity),
-                )
-
-        total_allocated = connection.execute(
-            """
-            SELECT COALESCE(SUM(quantity), 0)
-            FROM matches
-            WHERE request_id = ? AND status != 'cancelled'
-            """,
-            (request_id,),
-        ).fetchone()[0]
-        if total_allocated >= request["people"]:
-            new_status = "matched"
-        elif total_allocated:
-            new_status = "partially_fulfilled"
-        else:
-            new_status = "pending"
-        connection.execute(
-            "UPDATE requests SET status = ? WHERE id = ?",
-            (new_status, request_id),
+    # Prefer the nearest one-resource solution before considering a split.
+    complete_candidate = next(
+        (candidate for candidate in nearby if candidate[2] >= request["people"]),
+        None,
+    )
+    allocations: list[dict[str, Any]] = []
+    if complete_candidate is not None:
+        distance, resource_id, _ = complete_candidate
+        allocations.append(
+            {
+                "resource_id": resource_id,
+                "quantity": request["people"],
+                "distance_km": distance,
+            }
         )
+        return MatchSuggestions(allocations)
 
-        return [
-            dict(row)
-            for row in connection.execute(
-                """
-                SELECT id, request_id, resource_id, quantity, status
-                FROM matches
-                WHERE request_id = ? AND status != 'cancelled'
-                ORDER BY id
-                """,
-                (request_id,),
-            ).fetchall()
-        ]
+    remaining = request["people"]
+    for distance, resource_id, available in nearby:
+        quantity = min(remaining, available)
+        if quantity:
+            allocations.append(
+                {
+                    "resource_id": resource_id,
+                    "quantity": quantity,
+                    "distance_km": distance,
+                }
+            )
+            remaining -= quantity
+        if remaining == 0:
+            break
+
+    return MatchSuggestions(allocations, shortfall=remaining)
 
 
 def _is_finite_number(value: Any) -> bool:
