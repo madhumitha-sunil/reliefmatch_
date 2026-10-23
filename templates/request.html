@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}New aid request · ReliefMatch{% endblock %}
+{% block body %}
+<header class="topbar">
+  <a class="brand" href="/request" aria-label="ReliefMatch">
+    <span class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></span>
+    <span>Relief<span class="brand-muted">Match</span></span>
+  </a>
+  <div class="topbar-right"><span class="role-chip"><span class="status-dot"></span> Volunteer</span><button class="text-button" data-logout type="button">Sign out</button></div>
+</header>
+<main class="request-page">
+  <section class="request-intro">
+    <p class="eyebrow">Field intake <span class="eyebrow-rule"></span> Tamil Nadu</p>
+    <h1>Tell us what<br>is needed.</h1>
+    <p class="intro-copy">A precise request helps nearby teams act sooner. Every detail stays attached to this request.</p>
+    <div class="intake-assurance"><span class="assurance-index">01</span><span>Record the need</span><span class="assurance-line"></span><span class="assurance-index">02</span><span>Coordinate a response</span></div>
+  </section>
+  <section class="request-card">
+    <div class="card-heading">
+      <div><p class="eyebrow">New aid request</p><h2>Request details</h2></div>
+      <span class="required-note">* Required</span>
+    </div>
+    <form id="request-form" class="request-form" novalidate>
+      <div class="field">
+        <label for="type">What is needed? <span>*</span></label>
+        <select id="type" name="type" required>
+          <option value="" disabled selected>Select aid type</option>
+          <option value="water">Drinking water</option>
+          <option value="food">Food</option>
+          <option value="medicine">Medicine</option>
+          <option value="shelter">Shelter</option>
+        </select>
+      </div>
+      <div class="field-grid">
+        <div class="field"><label for="people">People affected <span>*</span></label><input id="people" name="people" type="number" min="1" step="1" placeholder="e.g. 24" required></div>
+        <div class="field"><label for="severity">Severity <span>*</span></label>
+          <select id="severity" name="severity" required>
+            <option value="1">1 — Immediate danger</option><option value="2">2 — Critical</option><option value="3" selected>3 — Urgent</option><option value="4">4 — Needed soon</option><option value="5">5 — Can wait</option>
+          </select>
+        </div>
+      </div>
+      <div class="field location-field">
+        <div class="label-row"><label>Location <span>*</span></label><button id="locate-button" class="location-button" type="button"><span aria-hidden="true">◎</span> Use my location</button></div>
+        <p class="field-hint">Coordinates must be within Tamil Nadu.</p>
+        <div class="field-grid coordinate-grid">
+          <div class="field"><label for="lat">Latitude</label><input id="lat" name="lat" type="number" min="8" max="13.6" step="any" placeholder="e.g. 11.0168" required></div>
+          <div class="field"><label for="lon">Longitude</label><input id="lon" name="lon" type="number" min="76" max="80.4" step="any" placeholder="e.g. 76.9558" required></div>
+        </div>
+      </div>
+      <div id="request-message" class="notice" role="status" aria-live="polite" hidden></div>
+      <button class="button button-primary button-wide submit-request" type="submit"><span>Submit aid request</span><span aria-hidden="true">→</span></button>
+      <p class="privacy-note">Submitting records this request for coordination. Please avoid creating a duplicate for the same location.</p>
+    </form>
+  </section>
+  <footer class="page-footer"><span class="footer-mark">RM</span><span>Clear requests. Accountable response.</span><span class="footer-region">Tamil Nadu</span></footer>
+</main>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='js/request.js') }}" defer></script>{% endblock %}

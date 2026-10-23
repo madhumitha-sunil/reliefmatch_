@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}Operations · ReliefMatch{% endblock %}
+{% block head %}
+<link rel="stylesheet" href="{{ url_for('static', filename='vendor/leaflet/leaflet.css') }}">
+{% endblock %}
+{% block body %}
+<div class="dashboard-shell">
+  <header class="topbar dashboard-topbar">
+    <a class="brand" href="/dashboard" aria-label="ReliefMatch operations">
+      <span class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></span>
+      <span>Relief<span class="brand-muted">Match</span></span>
+    </a>
+    <div class="topbar-center"><span class="live-indicator"><span></span> LIVE OPERATIONS</span><span class="topbar-divider"></span><span class="region-label">Tamil Nadu response</span></div>
+    <div class="topbar-right"><span class="role-chip coordinator-chip">Coordinator</span><span id="coordinator-name" class="coordinator-name"></span><button class="text-button" data-logout type="button">Sign out</button></div>
+  </header>
+  <main class="dashboard-main">
+    <div class="dashboard-heading">
+      <div><p class="eyebrow">Operations desk <span class="eyebrow-rule"></span> <span id="current-date"></span></p><h1>Response overview</h1><p class="dashboard-subtitle">Turn urgent needs into clear, accountable decisions.</p></div>
+      <div class="refresh-status"><span class="refresh-pulse"></span><span>Auto-refreshes every 10 sec</span><button id="refresh-button" class="icon-button" type="button" aria-label="Refresh data" title="Refresh now">↻</button></div>
+    </div>
+    <div id="critical-banner" class="critical-banner" role="alert" hidden><span class="critical-icon" aria-hidden="true">!</span><div><strong>CRITICAL · Immediate coordination required</strong><p id="critical-copy"></p></div></div>
+    <div id="dashboard-error" class="notice notice-error dashboard-error" role="alert" hidden></div>
+    <section class="summary-strip" aria-label="Request summary">
+      <div class="summary-cell"><span class="summary-label">Awaiting decision</span><strong id="pending-count">—</strong><span class="summary-meta"><span class="summary-dot dot-amber"></span> Pending requests</span></div>
+      <div class="summary-cell"><span class="summary-label">People to reach</span><strong id="people-count">—</strong><span class="summary-meta">Across pending requests</span></div>
+      <div class="summary-cell"><span class="summary-label">Matched · not delivered</span><strong id="matched-count">—</strong><span class="summary-meta"><span class="summary-dot dot-teal"></span> In progress</span></div>
+      <div class="summary-cell"><span class="summary-label">Resources in network</span><strong id="resource-count">—</strong><span class="summary-meta">Available locations</span></div>
+    </section>
+    <section class="map-section panel">
+      <div class="section-heading map-heading"><div><p class="eyebrow">Live field picture</p><h2>Needs &amp; nearby resources</h2></div><div class="map-legend"><span><i class="legend-request"></i> Need</span><span><i class="legend-resource"></i> Resource</span><span><i class="legend-line"></i> Suggested route</span></div></div>
+      <div id="map" class="operations-map" role="region" aria-label="Map showing request and resource locations"></div>
+      <p id="tiles-note" class="map-note" hidden>Map tiles unavailable — locations and suggested routes remain visible.</p>
+    </section>
+    <section class="queue-section panel">
+      <div class="section-heading queue-heading">
+        <div><p class="eyebrow">Coordinator decisions</p><h2>Requests in progress</h2></div>
+        <div class="tab-list" role="tablist" aria-label="Operations view">
+          <button class="tab-button active" id="tab-pending" role="tab" aria-selected="true" aria-controls="pending-panel" type="button">Pending <span id="pending-tab-count">0</span></button>
+          <button class="tab-button" id="tab-matched" role="tab" aria-selected="false" aria-controls="matched-panel" type="button">Matched <span id="matched-tab-count">0</span></button>
+          <button class="tab-button" id="tab-audit" role="tab" aria-selected="false" aria-controls="audit-panel" type="button">Audit log</button>
+        </div>
+      </div>
+      <div id="pending-panel" class="tab-panel" role="tabpanel" aria-labelledby="tab-pending">
+        <div id="pending-list" class="request-list"><div class="loading-state"><span class="skeleton skeleton-line"></span><span class="skeleton skeleton-block"></span><span class="skeleton skeleton-line short"></span></div></div>
+      </div>
+      <div id="matched-panel" class="tab-panel" role="tabpanel" aria-labelledby="tab-matched" hidden>
+        <div id="matched-list" class="request-list"></div>
+      </div>
+      <div id="audit-panel" class="tab-panel" role="tabpanel" aria-labelledby="tab-audit" hidden>
+        <div id="audit-list" class="audit-list"></div>
+      </div>
+    </section>
+    <footer class="dashboard-footer"><span class="footer-mark">RM</span><span>Every decision leaves a record.</span><span id="last-updated" class="last-updated">Waiting for first update</span></footer>
+  </main>
+</div>
+<dialog id="override-dialog" class="override-dialog">
+  <form method="dialog" id="override-form">
+    <div class="dialog-heading"><div><p class="eyebrow">Change allocation</p><h2>Override suggestion</h2></div><button class="icon-button dialog-close" value="cancel" aria-label="Close" type="submit">×</button></div>
+    <p id="override-context" class="muted"></p>
+    <label for="override-resource">Alternate resource</label>
+    <select id="override-resource" required></select>
+    <div id="override-error" class="notice notice-error" role="alert" hidden></div>
+    <div class="dialog-actions"><button class="button button-secondary" value="cancel" type="submit">Cancel</button><button id="override-submit" class="button button-primary" type="button">Confirm override</button></div>
+  </form>
+</dialog>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='vendor/leaflet/leaflet.js') }}" defer></script>
+<script src="{{ url_for('static', filename='js/dashboard.js') }}" defer></script>
+{% endblock %}

@@ -102,11 +102,15 @@ def suggest_match(connection: sqlite3.Connection, request_id: int) -> MatchSugge
 
     resource_rows = connection.execute(
         """
-        SELECT id, quantity, lat, lon
-        FROM resources
-        WHERE type = ? AND quantity > 0
+        SELECT r.id, r.quantity, r.lat, r.lon
+        FROM resources AS r
+        WHERE r.type = ? AND r.quantity > 0
+          AND NOT EXISTS (
+              SELECT 1 FROM rejections AS rejected
+              WHERE rejected.request_id = ? AND rejected.resource_id = r.id
+          )
         """,
-        (request["type"],),
+        (request["type"], request_id),
     ).fetchall()
     nearby = sorted(
         (

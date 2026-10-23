@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Sign in · ReliefMatch{% endblock %}
+{% block body %}
+<main class="auth-shell">
+  <section class="auth-story" aria-label="ReliefMatch">
+    <a class="brand brand-on-dark" href="/login" aria-label="ReliefMatch home">
+      <span class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></span>
+      <span>Relief<span class="brand-light">Match</span></span>
+    </a>
+    <div class="story-copy">
+      <p class="eyebrow eyebrow-light">Tamil Nadu response network</p>
+      <h1>Make help<br>count.</h1>
+      <p class="story-lede">One clear view of urgent needs, available supplies, and the decisions that connect them.</p>
+    </div>
+    <div class="story-foot"><span class="status-dot"></span> Coordination, with accountability.</div>
+    <div class="story-contour" aria-hidden="true"></div>
+  </section>
+  <section class="auth-panel">
+    <div class="auth-form-wrap">
+      <p class="eyebrow">ReliefMatch access</p>
+      <h2>Welcome back</h2>
+      <p class="muted">Sign in with your response network account.</p>
+      <form id="login-form" class="form-stack" novalidate>
+        <label for="username">Username</label>
+        <input id="username" name="username" autocomplete="username" required>
+        <label for="password">Password</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" required>
+        <div id="login-error" class="notice notice-error" role="alert" hidden></div>
+        <button class="button button-primary button-wide" type="submit">
+          <span>Sign in</span><span aria-hidden="true">→</span>
+        </button>
+      </form>
+      <p class="auth-note"><span class="lock-icon" aria-hidden="true"></span> Your session is protected and access is role-based.</p>
+    </div>
+    <footer class="auth-footer">ReliefMatch <span>·</span> Field operations console</footer>
+  </section>
+</main>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/login.js') }}" defer></script>
+{% endblock %}

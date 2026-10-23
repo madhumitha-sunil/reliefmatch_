@@ -1,4 +1,4 @@
-"""JSON-only Flask API for ReliefMatch."""
+"""Flask API and server-rendered pages for ReliefMatch."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from functools import wraps
 from pathlib import Path
 from typing import Any, Callable
 
-from flask import Flask, g, jsonify, request, session
+from flask import Flask, g, jsonify, redirect, render_template, request, session, url_for
 from werkzeug.security import check_password_hash
 
 from db import DEFAULT_DB_PATH, get_connection, initialize_db
@@ -125,7 +125,7 @@ def _record_action_failure(
 def _request_row(connection: sqlite3.Connection, request_id: int):
     return connection.execute(
         """
-        SELECT id, type, people, severity, lat, lon, status, created_at, expires_at
+        SELECT id, type, people, severity, lat, lon, status, created_at, matched_at, expires_at
         FROM requests WHERE id = ?
         """,
         (request_id,),
@@ -177,7 +177,11 @@ def _apply_allocations(
         )
 
     changed = connection.execute(
-        "UPDATE requests SET status = 'matched' WHERE id = ? AND status = 'pending'",
+        """
+        UPDATE requests
+        SET status = 'matched', matched_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        WHERE id = ? AND status = 'pending'
+        """,
         (request_row["id"],),
     )
     if changed.rowcount != 1:
@@ -224,6 +228,40 @@ def create_app(
     @app.errorhandler(500)
     def internal_error(_error):
         return _json_error("Internal server error", 500)
+
+    @app.get("/")
+    def home_page():
+        user = _logged_in_user()
+        if user is None:
+            return redirect(url_for("login_page"))
+        return redirect(url_for("dashboard_page" if user["role"] == "coordinator" else "request_page"))
+
+    @app.get("/login")
+    def login_page():
+        user = _logged_in_user()
+        if user is not None:
+            return redirect(
+                url_for("dashboard_page" if user["role"] == "coordinator" else "request_page")
+            )
+        return render_template("login.html")
+
+    @app.get("/request")
+    def request_page():
+        user = _logged_in_user()
+        if user is None:
+            return redirect(url_for("login_page"))
+        if user["role"] != "volunteer":
+            return redirect(url_for("dashboard_page"))
+        return render_template("request.html")
+
+    @app.get("/dashboard")
+    def dashboard_page():
+        user = _logged_in_user()
+        if user is None:
+            return redirect(url_for("login_page"))
+        if user["role"] != "coordinator":
+            return redirect(url_for("request_page"))
+        return render_template("dashboard.html", username=user["username"])
 
     @app.post("/api/login")
     def login():
@@ -380,7 +418,7 @@ def create_app(
     def list_requests():
         rows = g.db.execute(
             """
-            SELECT id, type, people, severity, lat, lon, status, created_at, expires_at
+            SELECT id, type, people, severity, lat, lon, status, created_at, matched_at, expires_at
             FROM requests ORDER BY created_at DESC, id DESC
             """
         ).fetchall()
@@ -392,7 +430,7 @@ def create_app(
         now = datetime.now(UTC)
         pending = g.db.execute(
             """
-            SELECT id, type, people, severity, lat, lon, status, created_at, expires_at
+            SELECT id, type, people, severity, lat, lon, status, created_at, matched_at, expires_at
             FROM requests WHERE status = 'pending'
             """
         ).fetchall()
@@ -412,6 +450,17 @@ def create_app(
             )
         suggestions.sort(key=lambda item: (-item["urgency"], item["id"]))
         return jsonify(suggestions)
+
+    @app.get("/api/resources")
+    @login_required
+    def list_resources():
+        rows = g.db.execute(
+            """
+            SELECT id, type, quantity, lat, lon, provider
+            FROM resources ORDER BY type, id
+            """
+        ).fetchall()
+        return jsonify([dict(row) for row in rows])
 
     @app.post("/api/matches/<int:request_id>/approve")
     @app.post("/requests/<int:request_id>/approve")
@@ -478,11 +527,71 @@ def create_app(
             )
             return _json_error("Only pending requests can be rejected", 409)
 
-        # The schema intentionally has no rejected request status, so reject is
-        # recorded as a coordinator decision without changing request status.
-        _audit_result(g.db, g.user["username"], "reject", True, request_id=request_id)
+        body = request.get_json(silent=True)
+        if not isinstance(body, dict):
+            body = {}
+        resource_id = body.get("resource_id")
+        if resource_id is not None and (
+            isinstance(resource_id, bool) or not isinstance(resource_id, int)
+        ):
+            _record_action_failure(
+                g.db, g.user["username"], "reject", "invalid_resource_id"
+            )
+            return _json_error("resource_id must be an integer", 400)
+
+        existing_rejection = None
+        if resource_id is not None:
+            existing_rejection = g.db.execute(
+                "SELECT 1 FROM rejections WHERE request_id = ? AND resource_id = ?",
+                (request_id, resource_id),
+            ).fetchone()
+        suggestions = suggest_match(g.db, request_id)
+        if resource_id is None:
+            if not suggestions:
+                _record_action_failure(
+                    g.db, g.user["username"], "reject", "no_suggested_resource"
+                )
+                return _json_error("There is no suggested resource to reject", 409)
+            resource_id = suggestions[0]["resource_id"]
+        else:
+            resource = g.db.execute(
+                "SELECT id FROM resources WHERE id = ? AND type = ?",
+                (resource_id, row["type"]),
+            ).fetchone()
+            if resource is None:
+                _record_action_failure(
+                    g.db, g.user["username"], "reject", "resource_not_found"
+                )
+                return _json_error("Matching resource not found", 404)
+            if not existing_rejection and resource_id not in {
+                item["resource_id"] for item in suggestions
+            }:
+                _record_action_failure(
+                    g.db, g.user["username"], "reject", "resource_not_suggested"
+                )
+                return _json_error("Resource is not currently suggested", 409)
+
+        g.db.execute(
+            "INSERT OR IGNORE INTO rejections (request_id, resource_id) VALUES (?, ?)",
+            (request_id, resource_id),
+        )
+        _audit_result(
+            g.db,
+            g.user["username"],
+            "reject",
+            True,
+            request_id=request_id,
+            resource_id=resource_id,
+        )
         g.db.commit()
-        return jsonify({"request_id": request_id, "status": "pending", "rejected": True})
+        return jsonify(
+            {
+                "request_id": request_id,
+                "status": "pending",
+                "rejected": True,
+                "resource_id": resource_id,
+            }
+        )
 
     @app.post("/api/matches/<int:request_id>/override")
     @coordinator_required("override")
@@ -590,6 +699,10 @@ def create_app(
         )
         g.db.execute(
             "UPDATE requests SET status = 'pending' WHERE id = ? AND status = 'matched'",
+            (request_id,),
+        )
+        g.db.execute(
+            "UPDATE requests SET matched_at = NULL WHERE id = ?",
             (request_id,),
         )
         _audit_result(g.db, g.user["username"], "undo", True, request_id=request_id)

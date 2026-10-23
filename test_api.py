@@ -122,6 +122,22 @@ def test_login_logout_and_passwords_are_hashed(api):
     assert stored_hash.startswith("scrypt:")
 
 
+def test_role_gated_pages_and_local_assets_render(api):
+    client, _database_path = api
+
+    assert client.get("/login").status_code == 200
+    assert client.get("/dashboard").headers["Location"].endswith("/login")
+    assert login(client, "volunteer", "vol-password").status_code == 200
+    assert client.get("/request").status_code == 200
+    assert client.get("/dashboard").headers["Location"].endswith("/request")
+    assert client.get("/static/css/reliefmatch.css").status_code == 200
+
+    assert client.post("/api/logout").status_code == 200
+    assert login(client).status_code == 200
+    assert client.get("/dashboard").status_code == 200
+    assert client.get("/request").headers["Location"].endswith("/dashboard")
+
+
 def test_volunteer_can_create_requests_but_cannot_perform_coordinator_actions(api):
     client, database_path = api
     assert login(client, "volunteer", "vol-password").status_code == 200
@@ -242,6 +258,11 @@ def test_approve_reduces_stock_and_prevents_double_allocation(api):
     assert blocked.status_code == 409
     assert blocked.get_json()["shortfall"] == 3
     assert get_scalar(
+        database_path, "SELECT matched_at FROM requests WHERE id = ?", (first_request,)
+    )
+    listed = client.get("/api/requests").get_json()
+    assert next(item for item in listed if item["id"] == first_request)["matched_at"]
+    assert get_scalar(
         database_path, "SELECT quantity FROM resources WHERE id = ?", (resource_id,)
     ) == 3
     assert get_scalar(
@@ -271,6 +292,9 @@ def test_undo_restores_stock_and_cancels_matches(api):
     assert get_scalar(
         database_path, "SELECT status FROM requests WHERE id = ?", (request_id,)
     ) == "pending"
+    assert get_scalar(
+        database_path, "SELECT matched_at FROM requests WHERE id = ?", (request_id,)
+    ) is None
 
 
 def test_override_uses_an_alternate_resource_inside_approval_flow(api):
@@ -305,18 +329,46 @@ def test_override_uses_an_alternate_resource_inside_approval_flow(api):
 def test_reject_is_audited_without_adding_an_unsupported_status(api):
     client, database_path = api
     login(client)
+    resource_id = insert_resource(database_path, quantity=8)
     request_id = insert_request(database_path, people=3)
 
     response = client.post(f"/api/matches/{request_id}/reject")
 
     assert response.status_code == 200
     assert response.get_json()["status"] == "pending"
+    assert response.get_json()["resource_id"] == resource_id
     assert get_scalar(
         database_path, "SELECT status FROM requests WHERE id = ?", (request_id,)
     ) == "pending"
     assert get_scalar(
         database_path,
         "SELECT COUNT(*) FROM audit_log WHERE action = 'reject' AND \"user\" = 'coordinator'",
+    ) == 1
+
+
+def test_rejected_resource_is_skipped_by_later_suggestions(api):
+    client, database_path = api
+    login(client)
+    nearest_id = insert_resource(database_path, quantity=30, lat=10.7901)
+    alternate_id = insert_resource(database_path, quantity=30, lat=10.82)
+    request_id = insert_request(database_path, people=8)
+
+    first_suggestion = client.get("/api/suggestions").get_json()[0]
+    assert first_suggestion["matches"][0]["resource_id"] == nearest_id
+
+    rejected = client.post(
+        f"/api/matches/{request_id}/reject",
+        json={"resource_id": nearest_id},
+    )
+    next_suggestion = client.get("/api/suggestions").get_json()[0]
+
+    assert rejected.status_code == 200
+    assert next_suggestion["matches"][0]["resource_id"] == alternate_id
+    assert nearest_id not in {item["resource_id"] for item in next_suggestion["matches"]}
+    assert get_scalar(
+        database_path,
+        "SELECT COUNT(*) FROM rejections WHERE request_id = ? AND resource_id = ?",
+        (request_id, nearest_id),
     ) == 1
 
 

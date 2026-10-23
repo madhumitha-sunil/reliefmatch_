@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS requests (
     status TEXT NOT NULL DEFAULT 'pending'
         CHECK (status IN ('pending', 'matched', 'delivered')),
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    matched_at TEXT,
     expires_at TEXT NOT NULL
 );
 
@@ -46,6 +47,12 @@ CREATE TABLE IF NOT EXISTS matches (
         CHECK (status IN ('active', 'cancelled'))
 );
 
+CREATE TABLE IF NOT EXISTS rejections (
+    request_id INTEGER NOT NULL REFERENCES requests(id) ON DELETE CASCADE,
+    resource_id INTEGER NOT NULL REFERENCES resources(id) ON DELETE CASCADE,
+    PRIMARY KEY (request_id, resource_id)
+);
+
 CREATE TABLE IF NOT EXISTS audit_log (
     id INTEGER PRIMARY KEY,
     "user" TEXT NOT NULL,
@@ -58,6 +65,7 @@ CREATE INDEX IF NOT EXISTS idx_requests_status ON requests(status);
 CREATE INDEX IF NOT EXISTS idx_resources_type ON resources(type);
 CREATE INDEX IF NOT EXISTS idx_matches_request ON matches(request_id);
 CREATE INDEX IF NOT EXISTS idx_matches_resource ON matches(resource_id);
+CREATE INDEX IF NOT EXISTS idx_rejections_request ON rejections(request_id);
 """
 
 
@@ -80,5 +88,11 @@ def initialize_db(database_path: str | Path = DEFAULT_DB_PATH) -> None:
     connection = get_connection(database_path)
     try:
         connection.executescript(SCHEMA)
+        request_columns = {
+            row["name"]
+            for row in connection.execute("PRAGMA table_info(requests)").fetchall()
+        }
+        if "matched_at" not in request_columns:
+            connection.execute("ALTER TABLE requests ADD COLUMN matched_at TEXT")
     finally:
         connection.close()
