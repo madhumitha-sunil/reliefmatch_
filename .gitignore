@@ -58,3 +58,7 @@ Thumbs.db
 # Replit
 .cache/
 .local/
+
+venv/
+*.sqlite3*
+__pycache__/
