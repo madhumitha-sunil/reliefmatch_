@@ -20,6 +20,7 @@
       <div><p class="eyebrow">New aid request</p><h2>Request details</h2></div>
       <span class="required-note">* Required</span>
     </div>
+    <div id="queue-status" class="notice queue-status" role="status" aria-live="polite" hidden><span id="queue-text"></span> <button id="queue-send" class="text-button" type="button">Send now</button></div>
     <form id="request-form" class="request-form" novalidate>
       <div class="field">
         <label for="type">What is needed? <span>*</span></label>
@@ -55,4 +56,4 @@
   <footer class="page-footer"><span class="footer-mark">RM</span><span>Clear requests. Accountable response.</span><span class="footer-region">Tamil Nadu</span></footer>
 </main>
 {% endblock %}
-{% block scripts %}<script src="{{ url_for('static', filename='js/request.js') }}" defer></script>{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='js/queue.js') }}" defer></script><script src="{{ url_for('static', filename='js/request.js') }}" defer></script>{% endblock %}

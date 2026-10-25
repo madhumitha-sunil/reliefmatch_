@@ -36,6 +36,97 @@
     );
   });
 
+  // ---- Offline queue -------------------------------------------------------
+  const queue =
+    window.indexedDB && window.ReliefQueue
+      ? window.ReliefQueue.createQueue({
+          indexedDB: window.indexedDB,
+          fetch: window.fetch.bind(window),
+          crypto: window.crypto,
+        })
+      : null;
+  const queueBar = document.getElementById("queue-status");
+  const queueText = document.getElementById("queue-text");
+  const queueSend = document.getElementById("queue-send");
+  let lastStop = null;
+
+  const updateQueueBar = async () => {
+    if (!queue || !queueBar) return;
+    let waiting = 0;
+    try {
+      waiting = await queue.count();
+    } catch (_error) {
+      return;
+    }
+    if (waiting === 0) {
+      queueBar.hidden = true;
+      return;
+    }
+    const noun = waiting === 1 ? "request is" : "requests are";
+    let reason = "Waiting for a connection.";
+    if (lastStop === "auth") reason = "Sign in again to send.";
+    if (lastStop === "rate") reason = "Sending in small batches.";
+    queueText.textContent = `${waiting} ${noun} saved on this phone. ${reason}`;
+    queueBar.hidden = false;
+  };
+
+  const syncQueue = async () => {
+    if (!queue) return null;
+    let result;
+    try {
+      result = await queue.flush();
+    } catch (_error) {
+      return null;
+    }
+    lastStop = result.stopped;
+    await updateQueueBar();
+    return result;
+  };
+
+  queueSend?.addEventListener("click", async () => {
+    queueSend.disabled = true;
+    const result = await syncQueue();
+    queueSend.disabled = false;
+    if (result && result.sent.length) {
+      showMessage(`${result.sent.length} saved request(s) sent to the coordinator.`, false);
+    } else if (result && result.stopped === "auth") {
+      showMessage("You are signed out. Sign in again and the saved requests will be sent.", true);
+    } else if (result && result.stopped === "network") {
+      showMessage("Still no connection. Your requests are safe on this phone.", true);
+    }
+  });
+
+  window.addEventListener("online", syncQueue);
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) syncQueue();
+  });
+  window.setInterval(syncQueue, 15000);
+  syncQueue();
+
+  const resetSubmitButton = () => {
+    submitButton.disabled = false;
+    submitButton.innerHTML = "<span>Submit aid request</span><span aria-hidden=\"true\">→</span>";
+  };
+
+  const clearForm = () => {
+    form.reset();
+    form.elements.severity.value = "3";
+  };
+
+  // Old behaviour, used only if this browser has no IndexedDB.
+  const sendDirect = async (data) => {
+    const response = await fetch("/api/requests", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data)
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || "Your request could not be submitted.");
+    showMessage(`Request #${payload.id} is recorded. A coordinator can now review this need.`, false);
+    clearForm();
+  };
+
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     message.hidden = true;
@@ -58,22 +149,35 @@
     submitButton.disabled = true;
     submitButton.innerHTML = "<span>Submitting request…</span>";
     try {
-      const response = await fetch("/api/requests", {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data)
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload.error || "Your request could not be submitted.");
-      showMessage(`Request #${payload.id} is recorded. A coordinator can now review this need.`, false);
-      form.reset();
-      form.elements.severity.value = "3";
+      if (!queue) {
+        await sendDirect(data);
+        return;
+      }
+      // 1) Save on the phone first, so nothing is lost if the signal drops.
+      const item = await queue.add(data);
+      clearForm();
+      // 2) Try to send everything waiting (this request and any older ones).
+      const result = await syncQueue();
+      const sent = result && result.sent.find((entry) => entry.client_uuid === item.client_uuid);
+      const dropped = result && result.dropped.find((entry) => entry.client_uuid === item.client_uuid);
+      if (sent) {
+        showMessage(
+          sent.already_received
+            ? `Request #${sent.id} was already recorded. Nothing was duplicated.`
+            : `Request #${sent.id} is recorded. A coordinator can now review this need.`,
+          false
+        );
+      } else if (dropped) {
+        showMessage(dropped.error, true);
+      } else if (result && result.stopped === "auth") {
+        showMessage("Saved on this phone. You are signed out: sign in again and it will be sent.", true);
+      } else {
+        showMessage("Saved on this phone. It will be sent automatically when the connection returns.", false);
+      }
     } catch (error) {
       showMessage(error.message || "Unable to connect. Your request has not been submitted.", true);
     } finally {
-      submitButton.disabled = false;
-      submitButton.innerHTML = "<span>Submit aid request</span><span aria-hidden=\"true\">→</span>";
+      resetSubmitButton();
     }
   });
 

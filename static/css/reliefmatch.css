@@ -252,3 +252,6 @@ h1, h2 { color: var(--ink); letter-spacing: -.045em; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }
+
+.queue-status { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; color: #7a4a0d; background: var(--amber-pale); border-left: 3px solid var(--amber); }
+.queue-status .text-button { white-space: nowrap; font-weight: 650; }

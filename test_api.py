@@ -625,3 +625,19 @@ def test_migration_adds_client_uuid_to_an_existing_old_database(tmp_path):
         "SELECT COUNT(*) FROM requests WHERE client_uuid IS NULL"
     ).fetchone()[0] == 2
     connection.close()
+
+
+def test_request_page_loads_offline_queue_script_and_status_bar(api):
+    client, _database_path = api
+    login(client, "volunteer", "vol-password")
+
+    page = client.get("/request")
+
+    assert page.status_code == 200
+    html = page.get_data(as_text=True)
+    assert 'id="queue-status"' in html
+    assert "js/queue.js" in html
+    assert "js/request.js" in html
+    # queue.js must load before request.js, which depends on it
+    assert html.index("js/queue.js") < html.index("js/request.js")
+    assert client.get("/static/js/queue.js").status_code == 200
