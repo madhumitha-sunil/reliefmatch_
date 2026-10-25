@@ -11,7 +11,17 @@ from functools import wraps
 from pathlib import Path
 from typing import Any, Callable
 
-from flask import Flask, g, jsonify, redirect, render_template, request, session, url_for
+from flask import (
+    Flask,
+    g,
+    jsonify,
+    redirect,
+    render_template,
+    request,
+    send_from_directory,
+    session,
+    url_for,
+)
 from werkzeug.security import check_password_hash
 
 from db import DEFAULT_DB_PATH, get_connection, initialize_db
@@ -239,6 +249,24 @@ def create_app(
         if user is None:
             return redirect(url_for("login_page"))
         return redirect(url_for("dashboard_page" if user["role"] == "coordinator" else "request_page"))
+
+    @app.get("/manifest.webmanifest")
+    def web_manifest():
+        response = send_from_directory(
+            app.static_folder, "manifest.webmanifest", mimetype="application/manifest+json"
+        )
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+    @app.get("/sw.js")
+    def service_worker():
+        # Must be served from the site root so it can control every page.
+        response = send_from_directory(
+            app.static_folder, "sw.js", mimetype="application/javascript"
+        )
+        response.headers["Cache-Control"] = "no-cache"
+        response.headers["Service-Worker-Allowed"] = "/"
+        return response
 
     @app.get("/login")
     def login_page():

@@ -641,3 +641,76 @@ def test_request_page_loads_offline_queue_script_and_status_bar(api):
     # queue.js must load before request.js, which depends on it
     assert html.index("js/queue.js") < html.index("js/request.js")
     assert client.get("/static/js/queue.js").status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# Installable app (PWA): manifest, service worker, icons
+# ---------------------------------------------------------------------------
+
+
+def test_manifest_is_valid_and_all_its_icons_exist(api):
+    import json
+    import struct
+
+    client, _database_path = api
+
+    response = client.get("/manifest.webmanifest")
+
+    assert response.status_code == 200
+    assert response.mimetype == "application/manifest+json"
+    manifest = json.loads(response.get_data(as_text=True))
+    assert manifest["name"] == "ReliefMatch"
+    assert manifest["display"] == "standalone"
+    assert manifest["start_url"] == "/"
+    sizes = {icon["sizes"] for icon in manifest["icons"]}
+    assert {"192x192", "512x512"} <= sizes
+    assert any(icon["purpose"] == "maskable" for icon in manifest["icons"])
+    for icon in manifest["icons"]:
+        image_response = client.get(icon["src"])
+        assert image_response.status_code == 200, icon["src"]
+        # PNG header: 8-byte signature, then the IHDR chunk holding width and height.
+        assert image_response.data[:8] == b"\x89PNG\r\n\x1a\n"
+        width, height = struct.unpack(">II", image_response.data[16:24])
+        assert f"{width}x{height}" == icon["sizes"]
+
+
+def test_service_worker_is_served_from_site_root_and_never_cached_by_the_browser(api):
+    client, _database_path = api
+
+    response = client.get("/sw.js")
+
+    assert response.status_code == 200
+    assert "javascript" in response.mimetype
+    assert response.headers["Service-Worker-Allowed"] == "/"
+    assert "no-cache" in response.headers["Cache-Control"]
+    script = response.get_data(as_text=True)
+    assert 'startsWith("/api/")' in script  # live data is never intercepted
+    assert 'request.method !== "GET"' in script  # submissions are never intercepted
+
+
+def test_every_page_links_manifest_icon_and_registers_the_service_worker(api):
+    client, _database_path = api
+
+    login_page = client.get("/login").get_data(as_text=True)
+    assert 'rel="manifest"' in login_page
+    assert "apple-touch-icon" in login_page
+    assert "js/pwa.js" in login_page
+
+    login(client, "volunteer", "vol-password")
+    assert "js/pwa.js" in client.get("/request").get_data(as_text=True)
+    client.post("/api/logout")
+    login(client)
+    assert "js/pwa.js" in client.get("/dashboard").get_data(as_text=True)
+
+
+def test_everything_the_service_worker_precaches_actually_exists(api):
+    import re
+
+    client, _database_path = api
+    script = client.get("/sw.js").get_data(as_text=True)
+    block = script[script.index("const PRECACHE"):script.index("];", script.index("const PRECACHE"))]
+    paths = re.findall(r'"(/static/[^"]+)"', block)
+
+    assert len(paths) >= 6
+    for path in paths:
+        assert client.get(path).status_code == 200, path
