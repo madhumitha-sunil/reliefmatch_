@@ -26,7 +26,8 @@ CREATE TABLE IF NOT EXISTS requests (
         CHECK (status IN ('pending', 'matched', 'delivered')),
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
     matched_at TEXT,
-    expires_at TEXT NOT NULL
+    expires_at TEXT NOT NULL,
+    client_uuid TEXT
 );
 
 CREATE TABLE IF NOT EXISTS resources (
@@ -94,5 +95,15 @@ def initialize_db(database_path: str | Path = DEFAULT_DB_PATH) -> None:
         }
         if "matched_at" not in request_columns:
             connection.execute("ALTER TABLE requests ADD COLUMN matched_at TEXT")
+        if "client_uuid" not in request_columns:
+            # Migration for databases created before client_uuid existed.
+            # SQLite cannot add a UNIQUE column, so uniqueness comes from the index below.
+            connection.execute("ALTER TABLE requests ADD COLUMN client_uuid TEXT")
+        # Unique index allows many NULLs (old rows, requests sent without a UUID).
+        connection.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_requests_client_uuid "
+            "ON requests(client_uuid)"
+        )
+        connection.commit()
     finally:
         connection.close()

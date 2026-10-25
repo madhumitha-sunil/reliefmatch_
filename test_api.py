@@ -474,3 +474,154 @@ def test_seed_creates_expected_demo_dataset_and_is_idempotent(tmp_path):
         "seeded": False,
         "reason": "database_not_empty",
     }
+
+
+# ---------------------------------------------------------------------------
+# client_uuid: duplicate-safe request creation (offline queue sync)
+# ---------------------------------------------------------------------------
+
+UUID_PAYLOAD = {
+    "type": "water",
+    "people": 12,
+    "severity": 4,
+    "lat": 10.79,
+    "lon": 78.69,
+    "client_uuid": "a1b2c3d4-0001-4000-8000-000000000001",
+}
+
+
+def test_client_uuid_is_stored_on_first_submit(api):
+    client, database_path = api
+    login(client, "volunteer", "vol-password")
+
+    response = client.post("/api/requests", json=UUID_PAYLOAD)
+
+    assert response.status_code == 201
+    assert response.get_json()["already_received"] is False
+    assert get_scalar(
+        database_path, "SELECT client_uuid FROM requests WHERE id = ?", (response.get_json()["id"],)
+    ) == UUID_PAYLOAD["client_uuid"]
+
+
+def test_repeat_client_uuid_returns_already_received_without_new_row(api):
+    client, database_path = api
+    login(client, "volunteer", "vol-password")
+
+    first = client.post("/api/requests", json=UUID_PAYLOAD)
+    second = client.post("/api/requests", json=UUID_PAYLOAD)
+    third = client.post("/api/requests", json=UUID_PAYLOAD)
+
+    assert first.status_code == 201
+    assert second.status_code == 200
+    assert third.status_code == 200
+    assert second.get_json()["already_received"] is True
+    assert second.get_json()["id"] == first.get_json()["id"]
+    assert get_scalar(database_path, "SELECT COUNT(*) FROM requests") == 1
+
+
+def test_repeat_client_uuid_does_not_hit_rate_limit_or_nearby_duplicate_check(api):
+    client, database_path = api
+    login(client, "volunteer", "vol-password")
+    first = client.post("/api/requests", json=UUID_PAYLOAD)
+    assert first.status_code == 201
+
+    # 15 re-sends of the same request: more than the 10-per-minute limit, and the
+    # request sits at the same spot as itself (nearby-duplicate rule).
+    for _ in range(15):
+        again = client.post("/api/requests", json=UUID_PAYLOAD)
+        assert again.status_code == 200
+        assert again.get_json()["already_received"] is True
+    assert get_scalar(database_path, "SELECT COUNT(*) FROM requests") == 1
+
+
+def test_requests_without_client_uuid_still_work_as_before(api):
+    client, database_path = api
+    login(client, "volunteer", "vol-password")
+    payload = {k: v for k, v in UUID_PAYLOAD.items() if k != "client_uuid"}
+
+    first = client.post("/api/requests", json=payload)
+    second = client.post("/api/requests", json={**payload, "lat": 11.5})
+
+    assert first.status_code == 201
+    assert second.status_code == 201
+    assert get_scalar(database_path, "SELECT COUNT(*) FROM requests") == 2
+    assert get_scalar(
+        database_path, "SELECT COUNT(*) FROM requests WHERE client_uuid IS NULL"
+    ) == 2
+
+
+def test_different_client_uuids_create_separate_requests(api):
+    client, database_path = api
+    login(client, "volunteer", "vol-password")
+
+    first = client.post("/api/requests", json=UUID_PAYLOAD)
+    second = client.post(
+        "/api/requests",
+        json={**UUID_PAYLOAD, "lat": 11.5, "client_uuid": "a1b2c3d4-0002-4000-8000-000000000002"},
+    )
+
+    assert first.status_code == 201
+    assert second.status_code == 201
+    assert first.get_json()["id"] != second.get_json()["id"]
+
+
+def test_invalid_client_uuid_is_rejected(api):
+    client, database_path = api
+    login(client, "volunteer", "vol-password")
+
+    for bad in ["short", "has spaces in it!!", "x" * 65, 12345, ""]:
+        response = client.post("/api/requests", json={**UUID_PAYLOAD, "client_uuid": bad})
+        assert response.status_code == 400, bad
+    assert get_scalar(database_path, "SELECT COUNT(*) FROM requests") == 0
+
+
+def test_unique_index_blocks_duplicate_uuid_even_if_code_is_bypassed(api):
+    _client, database_path = api
+    connection = get_connection(database_path)
+    sql = (
+        "INSERT INTO requests (type, people, severity, lat, lon, expires_at, client_uuid) "
+        "VALUES ('water', 5, 3, 10.8, 78.7, '2099-01-01T00:00:00.000Z', ?)"
+    )
+    connection.execute(sql, ("same-uuid-0001",))
+    with pytest.raises(Exception) as error:
+        connection.execute(sql, ("same-uuid-0001",))
+    assert "UNIQUE" in str(error.value)
+    connection.close()
+
+
+def test_migration_adds_client_uuid_to_an_existing_old_database(tmp_path):
+    import sqlite3
+    from db import initialize_db
+
+    old_path = tmp_path / "old.sqlite3"
+    old = sqlite3.connect(old_path)
+    old.executescript(
+        """
+        CREATE TABLE requests (
+            id INTEGER PRIMARY KEY,
+            type TEXT NOT NULL, people INTEGER NOT NULL, severity INTEGER NOT NULL,
+            lat REAL NOT NULL, lon REAL NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            created_at TEXT NOT NULL DEFAULT 'x',
+            matched_at TEXT,
+            expires_at TEXT NOT NULL
+        );
+        INSERT INTO requests (type, people, severity, lat, lon, expires_at)
+        VALUES ('water', 8, 3, 10.8, 78.7, '2099-01-01T00:00:00.000Z'),
+               ('food', 3, 2, 10.9, 78.8, '2099-01-01T00:00:00.000Z');
+        """
+    )
+    old.commit()
+    old.close()
+
+    initialize_db(old_path)
+    initialize_db(old_path)  # running twice must be safe
+
+    connection = get_connection(old_path)
+    columns = {row["name"] for row in connection.execute("PRAGMA table_info(requests)")}
+    assert "client_uuid" in columns
+    assert connection.execute("SELECT COUNT(*) FROM requests").fetchone()[0] == 2
+    assert connection.execute(
+        "SELECT COUNT(*) FROM requests WHERE client_uuid IS NULL"
+    ).fetchone()[0] == 2
+    connection.close()

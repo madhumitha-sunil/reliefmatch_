@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from functools import wraps
@@ -27,6 +28,9 @@ REQUEST_RATE_LIMIT = 10
 REQUEST_RATE_WINDOW = timedelta(minutes=1)
 DUPLICATE_WINDOW = timedelta(minutes=30)
 DUPLICATE_RADIUS_KM = 0.2
+
+
+CLIENT_UUID_PATTERN = re.compile(r"^[A-Za-z0-9-]{8,64}$")
 
 
 def _timestamp(value: datetime) -> str:
@@ -314,7 +318,29 @@ def create_app(
         one_minute_ago = _timestamp(now - REQUEST_RATE_WINDOW)
         thirty_minutes_ago = _timestamp(now - DUPLICATE_WINDOW)
 
+        body = request.get_json(silent=True)
+        if not isinstance(body, dict):
+            body = {}
+        client_uuid = body.get("client_uuid")
+        if client_uuid is not None and not (
+            isinstance(client_uuid, str) and CLIENT_UUID_PATTERN.match(client_uuid)
+        ):
+            return _json_error("client_uuid must be 8-64 letters, digits or hyphens", 400)
+
         g.db.execute("BEGIN IMMEDIATE")
+        if client_uuid is not None:
+            # A repeat UUID means the phone is re-sending a request we already hold
+            # (for example after a dropped connection). Return the original, create nothing.
+            existing = g.db.execute(
+                """
+                SELECT id, type, people, severity, lat, lon, status, created_at, expires_at
+                FROM requests WHERE client_uuid = ?
+                """,
+                (client_uuid,),
+            ).fetchone()
+            if existing is not None:
+                g.db.rollback()
+                return jsonify({**dict(existing), "already_received": True}), 200
         request_count = g.db.execute(
             """
             SELECT COUNT(*) FROM audit_log
@@ -334,9 +360,6 @@ def create_app(
             return _json_error("Request rate limit exceeded", 429)
         _audit_result(g.db, g.user["username"], "request_attempt", True)
 
-        body = request.get_json(silent=True)
-        if not isinstance(body, dict):
-            body = {}
         try:
             request_type = body.get("type")
             people = body.get("people")
@@ -381,10 +404,10 @@ def create_app(
         cursor = g.db.execute(
             """
             INSERT INTO requests
-                (type, people, severity, lat, lon, status, created_at, expires_at)
-            VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)
+                (type, people, severity, lat, lon, status, created_at, expires_at, client_uuid)
+            VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?)
             """,
-            (request_type, people, severity, lat, lon, created_at, expires_at),
+            (request_type, people, severity, lat, lon, created_at, expires_at, client_uuid),
         )
         request_id = cursor.lastrowid
         _audit_result(
@@ -408,6 +431,7 @@ def create_app(
                     "status": "pending",
                     "created_at": created_at,
                     "expires_at": expires_at,
+                    "already_received": False,
                 }
             ),
             201,
