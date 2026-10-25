@@ -9,8 +9,8 @@ Field volunteers submit requests from a phone. Coordinators see them on a live d
 Requires Python 3.10+.
 
 ```powershell
-# 1. Install dependencies (listed in pyproject.toml)
-pip install .
+# 1. Install dependencies
+pip install flask pytest
 
 # 2. Set a session secret (the app will not start without it)
 $env:SESSION_SECRET = "any-long-random-string"
