@@ -62,3 +62,4 @@ Thumbs.db
 venv/
 *.sqlite3*
 __pycache__/
+backups/

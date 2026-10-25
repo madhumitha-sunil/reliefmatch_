@@ -769,4 +769,16 @@ def create_app(
 
 
 if __name__ == "__main__":
-    create_app().run(host="0.0.0.0", port=5000)
+    application = create_app()
+    # Automatic backups: one now, then every RELIEFMATCH_BACKUP_MINUTES (default 10).
+    # Set RELIEFMATCH_BACKUP_MINUTES=0 to turn them off. Copies go to the "backups" folder.
+    from backup import DEFAULT_INTERVAL_MINUTES, DEFAULT_KEEP, start_scheduler
+
+    start_scheduler(
+        application.config["DATABASE_PATH"],
+        interval_minutes=float(
+            os.environ.get("RELIEFMATCH_BACKUP_MINUTES", DEFAULT_INTERVAL_MINUTES)
+        ),
+        keep=int(os.environ.get("RELIEFMATCH_BACKUP_KEEP", DEFAULT_KEEP)),
+    )
+    application.run(host="0.0.0.0", port=5000)
