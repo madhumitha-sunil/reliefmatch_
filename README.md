@@ -11,34 +11,39 @@ A disaster-aid coordination web app (water, food, medicine, shelter) built as an
 ## Key features
 
 ### Matching and decisions
-- **Urgency score:** `severity x min(people, 1000) x wait_factor x type_weight`, where `wait_factor = (1 + min(wait_hours, 24)) / 6`. Type weights: medicine 3.0, water 2.0, food 1.5, shelter 1.0. Scores are computed on demand, not stored.
-- **Nearest-resource matching:** straight-line (haversine) distance, nearest resource with enough stock first. A request can be split across several resources, and any shortfall is reported.
-- **Human approval:** suggestions are read-only. Status flow is Pending, Matched, Delivered. The coordinator can approve (stock is rechecked inside one transaction), reject, override, undo (restores stock) and mark delivered.
+
+* **Urgency score:** `severity x min(people, 1000) x wait\_factor x type\_weight`, where `wait\_factor = (1 + min(wait\_hours, 24)) / 6`. Type weights: medicine 3.0, water 2.0, food 1.5, shelter 1.0. Scores are computed on demand, not stored.
+* **Nearest-resource matching:** straight-line (haversine) distance, nearest resource with enough stock first. A request can be split across several resources, and any shortfall is reported.
+* **Human approval:** suggestions are read-only. Status flow is Pending, Matched, Delivered. The coordinator can approve (stock is rechecked inside one transaction), reject, override, undo (restores stock) and mark delivered.
 
 ### Works with a weak or missing connection
-- **Offline request queue:** a volunteer's request is saved on the phone first (IndexedDB) and sent when the connection returns. Each request carries a unique `client_uuid`, so if a reply is lost and the phone re-sends, the server answers "already received" and never creates a duplicate. The most urgent queued requests are sent first.
-- **Installable app (PWA):** manifest, icons and a service worker. On HTTPS, the app can be added to the phone's home screen and the request page opens with no connection. Live data (`/api/...`) and submissions are never cached.
-- **Automatic backup:** the database is copied every 10 minutes using SQLite's online backup (safe in WAL mode), verified, and the newest 30 copies are kept.
+
+* **Offline request queue:** a volunteer's request is saved on the phone first (IndexedDB) and sent when the connection returns. Each request carries a unique `client\_uuid`, so if a reply is lost and the phone re-sends, the server answers "already received" and never creates a duplicate. The most urgent queued requests are sent first.
+* **Installable app (PWA):** manifest, icons and a service worker. On HTTPS, the app can be added to the phone's home screen and the request page opens with no connection. Live data (`/api/...`) and submissions are never cached.
+* **Automatic backup:** the database is copied every 10 minutes using SQLite's online backup (safe in WAL mode), verified, and the newest 30 copies are kept.
 
 ### Safety and control
-- Login with roles (coordinator, volunteer), hashed passwords, audit log of every action.
-- Rate limit: 10 requests per minute per user. Requests expire after 24 hours.
-- Duplicate detection: a request within 200 m and 30 minutes of an existing one is flagged.
-- Location check: coordinates must fall in a Tamil Nadu bounding box (latitude 8 to 13.6, longitude 76 to 80.4), in code and in the database schema.
-- Dashboard: critical-request banner, sound and speech alerts, escalation, a stale flag after 60 minutes, and a Leaflet map (Leaflet is stored locally).
+
+* Login with roles (coordinator, volunteer), hashed passwords, audit log of every action.
+* Rate limit: 10 requests per minute per user. Requests expire after 24 hours.
+* Duplicate detection: a request within 200 m and 30 minutes of an existing one is flagged.
+* Location check: coordinates must fall in a Tamil Nadu bounding box (latitude 8 to 13.6, longitude 76 to 80.4), in code and in the database schema.
+* Dashboard: critical-request banner, sound and speech alerts, escalation, a stale flag after 60 minutes, and a Leaflet map (Leaflet is stored locally).
 
 ## How to run (Windows PowerShell)
 
 Requires Python 3.10+.
 
 ```powershell
-cd ReliefMatch
+git clone https://github.com/madhumitha-sunil/reliefmatch\_.git
+
+cd reliefmatch\_
 python -m venv venv
-venv\Scripts\activate
+venv\\Scripts\\activate
 pip install flask pytest
 
 # The app refuses to start without a session secret
-$env:SESSION_SECRET = "any-long-random-string"
+$env:SESSION\_SECRET = "any-long-random-string"
 
 # First run only: create and seed the demo database
 python seed.py
@@ -46,16 +51,16 @@ python seed.py
 python app.py
 ```
 
-Open http://localhost:5000. On macOS or Linux, set the secret with `export SESSION_SECRET=...`.
+Open http://localhost:5000. On macOS or Linux, set the secret with `export SESSION\_SECRET=...`.
 
-To reset the demo data: stop the app, delete `reliefmatch.sqlite3*`, then run `python seed.py` again.
+To reset the demo data: stop the app, delete `reliefmatch.sqlite3\*`, then run `python seed.py` again.
 
 ### Demo accounts
 
-| Username | Role | Password |
-|---|---|---|
-| `coordinator` | Coordinator | `relief123` |
-| `volunteer` | Volunteer | `relief123` |
+|Username|Role|Password|
+|-|-|-|
+|`coordinator`|Coordinator|`relief123`|
+|`volunteer`|Volunteer|`relief123`|
 
 These are shared demo credentials. Change them before any real use.
 
@@ -77,7 +82,7 @@ python backup.py list           # list saved backups, newest first
 python backup.py restore NAME   # restore one (stop the app first)
 ```
 
-Copies go to the `backups/` folder. Restoring first saves the current database as `before-restore-...`, so a mistaken restore can be undone. Settings: `RELIEFMATCH_BACKUP_MINUTES` (default 10, `0` turns it off) and `RELIEFMATCH_BACKUP_KEEP` (default 30).
+Copies go to the `backups/` folder. Restoring first saves the current database as `before-restore-...`, so a mistaken restore can be undone. Settings: `RELIEFMATCH\_BACKUP\_MINUTES` (default 10, `0` turns it off) and `RELIEFMATCH\_BACKUP\_KEEP` (default 30).
 
 ### Run the tests
 
@@ -89,17 +94,17 @@ python -m pytest
 
 ## Limitations
 
-- **Straight-line distance.** Matching ignores roads, flooding and blocked routes.
-- **Simulated data.** The demo flood requests and resources are generated by `seed.py`, not from a real event.
-- **One server device.** The app runs on a single laptop or hosted account. If it is switched off, nobody can sync.
-- **Development server, not load-tested.** It runs on the Flask development server and has not been tested with many simultaneous users.
-- **Queue needs a signed-in session.** A volunteer must be signed in with the request page already loaded before the connection drops. If the session has expired, queued requests wait until they sign in again. The server limit of 10 requests per minute means a very large backlog is sent in batches. Requests the server will never accept (invalid, or a nearby duplicate) are dropped from the queue with a message.
-- **Offline maps.** Map tiles load from OpenStreetMap, so with no connection the map background is blank, though pins and lines still draw. Offline tile packs for downloaded regions are not built.
-- **Installable app needs HTTPS.** Service workers run only on HTTPS or localhost, so installing and opening the page with no connection works on the hosted link, not on a plain local-network address.
-- **Hosted demo is not production.** The free PythonAnywhere account has a daily CPU allowance, expires unless renewed, and has no scheduled tasks, so the hosted copy does not back itself up. Automatic backup runs where `python app.py` is started.
-- **Demo-grade security.** Seeded passwords are shared and public.
-- **Bounding box only.** Location checks use a rectangle around Tamil Nadu, so points just outside the border but inside the rectangle are accepted.
-- **Phone access depends on the network.** Hotspot behaviour, firewall settings and changing IP addresses can block the connection, so test at the venue first.
+* **Straight-line distance.** Matching ignores roads, flooding and blocked routes.
+* **Simulated data.** The demo flood requests and resources are generated by `seed.py`, not from a real event.
+* **One server device.** The app runs on a single laptop or hosted account. If it is switched off, nobody can sync.
+* **Development server, not load-tested.** It runs on the Flask development server and has not been tested with many simultaneous users.
+* **Queue needs a signed-in session.** A volunteer must be signed in with the request page already loaded before the connection drops. If the session has expired, queued requests wait until they sign in again. The server limit of 10 requests per minute means a very large backlog is sent in batches. Requests the server will never accept (invalid, or a nearby duplicate) are dropped from the queue with a message.
+* **Offline maps.** Map tiles load from OpenStreetMap, so with no connection the map background is blank, though pins and lines still draw. Offline tile packs for downloaded regions are not built.
+* **Installable app needs HTTPS.** Service workers run only on HTTPS or localhost, so installing and opening the page with no connection works on the hosted link, not on a plain local-network address.
+* **Hosted demo is not production.** The free PythonAnywhere account has a daily CPU allowance, expires unless renewed, and has no scheduled tasks, so the hosted copy does not back itself up. Automatic backup runs where `python app.py` is started.
+* **Demo-grade security.** Seeded passwords are shared and public.
+* **Bounding box only.** Location checks use a rectangle around Tamil Nadu, so points just outside the border but inside the rectangle are accepted.
+* **Phone access depends on the network.** Hotspot behaviour, firewall settings and changing IP addresses can block the connection, so test at the venue first.
 
 ## Future work
 
@@ -112,17 +117,20 @@ python -m pytest
 
 ## Project structure
 
-| File or folder | Purpose |
-|---|---|
-| `app.py` | Web app, routes, authentication, alerts, service worker and manifest routes |
-| `logic.py` | Validation, urgency scoring, distance, matching |
-| `db.py` | Database schema, safe migration (adds `client_uuid`), connections |
-| `seed.py` | Creates demo users and sample resources |
-| `backup.py` | Automatic backup, rotation, restore |
-| `templates/` | Pages (login, request, dashboard) |
-| `static/js/queue.js` | Offline queue (IndexedDB) and safe re-send logic |
-| `static/js/request.js` | Request form and queue status bar |
-| `static/sw.js` | Service worker (caching rules for the installable app) |
-| `static/manifest.webmanifest`, `static/icons/` | App name, icons and install settings |
-| `static/css/`, `static/vendor/leaflet/` | Styles and the locally stored map library |
-| `test_api.py`, `test_logic.py`, `test_backup.py` | Automated tests |
+|File or folder|Purpose|
+|-|-|
+|`app.py`|Web app, routes, authentication, alerts, service worker and manifest routes|
+|`logic.py`|Validation, urgency scoring, distance, matching|
+|`db.py`|Database schema, safe migration (adds `client\_uuid`), connections|
+|`seed.py`|Creates demo users and sample resources|
+|`backup.py`|Automatic backup, rotation, restore|
+|`templates/`|Pages (login, request, dashboard)|
+|`static/js/queue.js`|Offline queue (IndexedDB) and safe re-send logic|
+|`static/js/request.js`|Request form and queue status bar|
+|`static/sw.js`|Service worker (caching rules for the installable app)|
+|`static/manifest.webmanifest`, `static/icons/`|App name, icons and install settings|
+|`static/css/`, `static/vendor/leaflet/`|Styles and the locally stored map library|
+|`test\_api.py`, `test\_logic.py`, `test\_backup.py`|Automated tests|
+
+
+
