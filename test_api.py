@@ -714,3 +714,13 @@ def test_everything_the_service_worker_precaches_actually_exists(api):
     assert len(paths) >= 6
     for path in paths:
         assert client.get(path).status_code == 200, path
+
+
+def test_favicon_is_served_so_browsers_get_no_404(api):
+    client, _database_path = api
+
+    direct = client.get("/favicon.ico")
+    assert direct.status_code == 200
+    assert direct.mimetype == "image/png"
+    assert direct.data[:8] == b"\x89PNG\r\n\x1a\n"
+    assert 'rel="icon"' in client.get("/login").get_data(as_text=True)

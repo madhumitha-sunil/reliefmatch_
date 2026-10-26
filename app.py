@@ -250,6 +250,15 @@ def create_app(
             return redirect(url_for("login_page"))
         return redirect(url_for("dashboard_page" if user["role"] == "coordinator" else "request_page"))
 
+    @app.get("/favicon.ico")
+    def favicon():
+        # Some browsers ask for /favicon.ico even when the page declares an icon.
+        response = send_from_directory(
+            app.static_folder, "icons/icon-192.png", mimetype="image/png"
+        )
+        response.headers["Cache-Control"] = "public, max-age=86400"
+        return response
+
     @app.get("/manifest.webmanifest")
     def web_manifest():
         response = send_from_directory(
